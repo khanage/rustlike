@@ -81,6 +81,8 @@ pub fn make_item(x: i32, y: i32, item: Item) -> Object {
                 power_bonus: 3,
                 defense_bonus: 0,
                 max_hp_bonus: 0,
+                movement_bonus: 0,
+                attacks_bonus: 0,
             };
             let mut object = Object::new(x, y, '/', colors::SKY, "sword", false);
             object.item = Some(Item::Sword);
@@ -94,6 +96,8 @@ pub fn make_item(x: i32, y: i32, item: Item) -> Object {
                 power_bonus: 0,
                 defense_bonus: 1,
                 max_hp_bonus: 0,
+                movement_bonus: 0,
+                attacks_bonus: 0,
             };
             let mut object = Object::new(x, y, '[', colors::SKY, "shield", false);
             object.item = Some(Item::Shield);
@@ -169,6 +173,8 @@ pub struct Equipment {
     pub power_bonus: i32,
     pub defense_bonus: i32,
     pub max_hp_bonus: i32,
+    pub movement_bonus: i32,
+    pub attacks_bonus: i32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]

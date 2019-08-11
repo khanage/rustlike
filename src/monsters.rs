@@ -26,6 +26,7 @@ pub fn make_monster(x: i32, y: i32, monster: Monster) -> Object {
                 on_death: DeathCallback::Monster,
                 xp: 35,
                 base_movement: 4,
+                base_attacks: 1,
             });
             orc.ai = Some(Ai::Basic);
 
@@ -42,6 +43,7 @@ pub fn make_monster(x: i32, y: i32, monster: Monster) -> Object {
                 on_death: DeathCallback::Monster,
                 xp: 100,
                 base_movement: 3,
+                base_attacks: 1,
             });
             troll.ai = Some(Ai::Basic);
 

@@ -54,8 +54,7 @@ pub fn ai_basic(
             let (player_x, player_y) = objects[PLAYER].pos();
             move_towards(monster_id, player_x, player_y, &game.map, objects);
         } else if objects[PLAYER].fighter.map_or(false, |f| f.hp > 0) {
-            let (monster, player) = mut_two(monster_id, PLAYER, objects);
-            monster.attack(player, game);
+            attack(monster_id, PLAYER, objects, game);
         }
     }
 

@@ -111,9 +111,11 @@ impl Object {
 
     pub fn attack(
         &mut self,
-        target: &mut Object,
+        target_index: usize,
+        objects: &mut [Object],
         game: &mut Game,
     ) {
+        let target = &mut objects[target_index];
         let power = self.power(game);
         let defense = target.defense(game);
 
@@ -213,38 +215,92 @@ impl Object {
     }
 
     pub fn power(&self, game: &Game) -> i32 {
-        let base_power = self.fighter.map_or(0, |f| f.base_power);
-        let bonus: i32 = self
-            .get_all_equipped(game)
-            .iter()
-            .map(|e| e.power_bonus)
-            .sum();
-
-        base_power + bonus
+        self.get_with_bonus(
+            game,
+            |f| f.base_power,
+            |e| e.power_bonus,
+        )
     }
 
     pub fn defense(&self, game: &Game) -> i32 {
-        let base_defense = self.fighter.map_or(0, |f| f.base_defense);
-        let bonus: i32 = self
-            .get_all_equipped(game)
-            .iter()
-            .map(|e| e.defense_bonus)
-            .sum();
+        self.get_with_bonus(
+            game,
+            |f| f.base_defense,
+            |e| e.defense_bonus,
+        )
+    }
 
-        base_defense + bonus
+    pub fn movement(&self, game: &Game) -> i32 {
+        self.get_with_bonus(
+            game,
+            |f| f.base_movement,
+            |e| e.movement_bonus,
+        )
     }
 
     pub fn max_hp(&self, game: &Game) -> i32 {
+        self.get_with_bonus(
+            game,
+            |f| f.base_max_hp,
+            |e| e.max_hp_bonus
+        )
+    }
 
+    pub fn attacks(&self, game: &Game) -> i32 {
+        self.get_with_bonus(
+            game,
+            |f| f.base_attacks,
+            |e| e.attacks_bonus,
+        )
+    }
 
-        let base_max_hp = self.fighter.map_or(0, |f| f.base_max_hp);
+    fn get_with_bonus<BaseGet, BonusGet>(
+        &self,
+        game: &Game,
+        base: BaseGet,
+        bonus: BonusGet
+    ) -> i32 where
+        BaseGet: FnOnce(Fighter) -> i32,
+        BonusGet: FnMut(&Equipment) -> i32,
+    {
+        let base: i32 = self.fighter.map_or(0, base);
         let bonus: i32 = self
             .get_all_equipped(game)
             .iter()
-            .map(|e| e.defense_bonus)
+            .map(bonus)
             .sum();
 
-        base_max_hp + bonus
+        base + bonus
+    }
+}
+
+pub fn attack(
+    attacker_index: usize,
+    target_index: usize,
+    objects: &mut [Object],
+    game: &mut Game,
+) {
+    let power = objects[attacker_index].power(game);
+    let defense = objects[target_index].defense(game);
+
+    let damage = power - defense;
+
+    if damage > 0 {
+        game.log.gutter_text(
+            format!("{} attacks {} for {} hit points.", objects[attacker_index].name, objects[target_index].name, damage),
+            colors::WHITE,
+        );
+        if let Some(xp) = objects[target_index].take_damage(damage, game) {
+            objects[attacker_index].fighter.as_mut().unwrap().xp += xp;
+        }
+    } else {
+        game.log.gutter_text(
+            format!(
+                "{} attacks {} but it has no effect!",
+                objects[attacker_index].name, objects[target_index].name
+            ),
+            colors::WHITE,
+        );
     }
 }
 
@@ -266,9 +322,10 @@ pub struct Tcod {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum PlayerAction {
-    TookTurn,
     DidntTakeTurn,
     Exit,
+    Move(i32, i32),
+    EndedMove,
 }
 
 #[derive(Clone,Copy,Debug,Deserialize,Serialize)]
@@ -301,6 +358,7 @@ pub struct Fighter {
     pub hp: i32,
 
     pub base_movement: i32,
+    pub base_attacks: i32,
     pub base_max_hp: i32,
     pub base_defense: i32,
     pub base_power: i32,

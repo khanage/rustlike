@@ -12,13 +12,7 @@ pub fn render_all(
     tcod: &mut Tcod,
     objects: &[Object],
     game: &mut Game,
-    fov_recompute: bool,
 ) {
-    if fov_recompute {
-        let player = &objects[PLAYER];
-        tcod.fov.compute_fov(player.x, player.y, TORCH_RADIUS, FOV_LIGHT_WALLS, FOV_ALGO);
-    }
-
     for y in 0..MAP_HEIGHT {
         for x in 0..MAP_WIDTH {
             let visible = tcod.fov.is_in_fov(x, y);

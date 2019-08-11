@@ -27,10 +27,11 @@ use std::io::{Read, Write};
 use std::fs::File;
 use std::error::Error;
 use std::cmp;
+use std::ops::Range;
 use rand::{distributions::{IndependentSample, Weighted, WeightedChoice}, Rng};
 
 use consts::*;
-use types::{DeathCallback, Fighter, Game, Map, Object, PlayerAction, Tcod, Tile};
+use types::{DeathCallback, Fighter, Game, Map, Object, PlayerAction, Tcod, Tile, attack};
 use logging::*;
 use items::*;
 use ai::{Ai, ai_take_turn, move_by};
@@ -116,8 +117,7 @@ fn player_move_or_attack(dx: i32, dy: i32, game: &mut Game, objects: &mut [Objec
 
     match target_id {
         Some(target_id) => {
-            let (player, target) = crate::util::mut_two(PLAYER, target_id, objects);
-            player.attack(target, game);
+            attack(PLAYER, target_id, objects, game);
         }
         None => {
             move_by(PLAYER, dx, dy, &game.map, objects);
@@ -125,10 +125,15 @@ fn player_move_or_attack(dx: i32, dy: i32, game: &mut Game, objects: &mut [Objec
     }
 }
 
+fn has_attackable_target(x: i32, y: i32, objects: &[Object]) -> Option<usize> {
+    objects
+        .iter()
+        .position(|o| o.fighter.is_some() && o.pos() == (x, y))
+}
+
 
 fn is_blocked(x: i32, y: i32, map: &Map, objects: &[Object]) -> bool {
     if map[x as usize][y as usize].blocked {
-        println!("BLOCKED BYT TILE");
         return true
     }
     objects.iter().any(|object| object.blocks && object.pos() == (x, y))
@@ -198,7 +203,7 @@ pub fn target_tile(
             None => {},
         }
 
-        display::render_all(tcod, objects, game, false);
+        display::render_all(tcod, objects, game);
 
         let (x, y) = (tcod.mouse.cx as i32, tcod.mouse.cy as i32);
 
@@ -415,6 +420,7 @@ fn new_game(tcod: &mut Tcod) -> (Vec<Object>, Game) {
         on_death: DeathCallback::Player,
         xp: 0,
         base_movement: 4,
+        base_attacks: 1,
     });
 
     let mut objects = vec![player];
@@ -434,6 +440,8 @@ fn new_game(tcod: &mut Tcod) -> (Vec<Object>, Game) {
         max_hp_bonus: 0,
         defense_bonus: 0,
         power_bonus: 2,
+        movement_bonus: 0,
+        attacks_bonus: 0,
     });
 
     game.inventory.push(dagger);
@@ -468,44 +476,132 @@ fn play_game(
     game: &mut Game,
     tcod: &mut Tcod,
 ) {
-    let mut previous_player_position = (-1, -1);
-    let mut key = Default::default();
+    tcod.fov.compute_fov(objects[PLAYER].x, objects[PLAYER].y, TORCH_RADIUS, FOV_LIGHT_WALLS, FOV_ALGO);
 
-    while !tcod.root.window_closed() {
-        let player = &objects[PLAYER];
-        let new_player_position = (player.x, player.y);
-        let fov_recompute = previous_player_position != new_player_position;
-        previous_player_position = new_player_position;
-
+    fn player_next_action(objects: &mut Vec<Object>, tcod: &mut Tcod, game: &mut Game) -> PlayerAction {
+        let mut key = Default::default();
         match input::check_for_event(input::MOUSE | input::KEY_PRESS) {
             Some((_, Event::Mouse(m))) => tcod.mouse = m,
             Some((_, Event::Key(k))) => key = k,
             _ => key = Default::default(),
         }
 
+        inputs::handle_keys(
+            key,
+            tcod,
+            objects,
+            game,
+        )
+    }
+
+    while !tcod.root.window_closed() {
         tcod.con.clear();
         display::render_all(
             tcod,
             &objects,
             game,
-            fov_recompute,
         );
         tcod.root.flush();
 
-        let player = &mut objects[PLAYER];
+        let mut pinned = is_pinned(PLAYER, objects);
+        let mut remaining_moves = objects[PLAYER].movement(game);
 
-        let player_action = inputs::handle_keys(
-            key,
-            tcod,
-            objects,
-            game,
-        );
-        if player_action == PlayerAction::Exit {
-            save_game(objects, game).expect("Failed to save!");
-            break
+        if pinned {
+            remaining_moves = 0;
+            game.gutter_text("You are pinned in place and cannot move", colors::WHITE);
+        } else {
+            game.gutter_text("Time to move", colors::WHITE);
         }
 
-        if objects[PLAYER].alive && player_action != PlayerAction::DidntTakeTurn {
+        while !pinned && remaining_moves > 0 {
+            match player_next_action(objects, tcod, game) {
+                PlayerAction::Exit => {
+                    save_game(objects, game).expect("Failed to save!");
+                    return
+                }
+                PlayerAction::DidntTakeTurn => {}
+                PlayerAction::Move(dx, dy) => {
+                    let x = objects[PLAYER].x + dx;
+                    let y = objects[PLAYER].y + dy;
+
+                    let tile_is_blocked = is_blocked(x, y, &game.map, objects);
+
+                    if tile_is_blocked {
+                        game.gutter_text("You cannot move there, it is blocked", colors::WHITE);
+                    } else {
+                        move_by(PLAYER, dx, dy, &game.map, objects);
+                        tcod.fov.compute_fov(objects[PLAYER].x, objects[PLAYER].y, TORCH_RADIUS, FOV_LIGHT_WALLS, FOV_ALGO);
+                        remaining_moves -= 1;
+                    }
+                }
+                PlayerAction::EndedMove => {
+                    remaining_moves = 0;
+                }
+            }
+
+            pinned = is_pinned(PLAYER, objects);
+
+            tcod.con.clear();
+            display::render_all(
+                tcod,
+                &objects,
+                game,
+            );
+            tcod.root.flush();
+        }
+
+
+        let mut remaining_attacks = objects[PLAYER].attacks(game);
+        let mut any_targets_in_range = has_valid_attack_targets(PLAYER, objects);
+
+        while any_targets_in_range && remaining_attacks > 0 {
+            game.gutter_text(
+                format!("Time to attack - you have {} attacks, with targets: {:?}.", remaining_attacks, targets_in_range(PLAYER, objects)),
+                colors::WHITE,
+            );
+
+            match player_next_action(objects, tcod, game) {
+                PlayerAction::Exit => {
+                    save_game(objects, game).expect("Failed to save!");
+                    return
+                }
+                PlayerAction::DidntTakeTurn => {}
+                PlayerAction::Move(dx, dy) => {
+                    let x = objects[PLAYER].x + dx;
+                    let y = objects[PLAYER].y + dy;
+
+                    let index_of_target = has_attackable_target(x, y, objects);
+
+                    match index_of_target {
+                        Some(target_index) => {
+                            attack(PLAYER, target_index, objects, game);
+                            remaining_attacks -= 1;
+                        }
+                        None => {
+                            game.gutter_text(
+                                "There is nothing to attack there",
+                                colors::WHITE,
+                            );
+                        }
+                    }
+                }
+                PlayerAction::EndedMove => {
+                    remaining_attacks = 0;
+                }
+            }
+
+            any_targets_in_range = has_valid_attack_targets(PLAYER, objects);
+
+            tcod.con.clear();
+            display::render_all(
+                tcod,
+                &objects,
+                game,
+            );
+            tcod.root.flush();
+        }
+
+        if objects[PLAYER].alive {
             for id in 0..objects.len() {
                 if objects[id].ai.is_some() {
                     ai_take_turn(id, game, objects, &tcod.fov)
@@ -513,6 +609,52 @@ fn play_game(
             }
         }
     }
+}
+
+fn is_pinned(
+    source_index: usize,
+    objects: &mut Vec<Object>,
+) -> bool {
+    // TODO: This should just check if there are any adjacent characters
+    // as targets_in_range is just doing adjacency checking atm
+
+    has_valid_attack_targets(source_index, objects)
+}
+
+fn has_valid_attack_targets(
+    source_index: usize,
+    objects: &mut Vec<Object>,
+) -> bool {
+    let targets = targets_in_range(source_index, objects);
+    targets.len() > 0
+}
+
+fn targets_in_range(
+    source_index: usize,
+    objects: &mut Vec<Object>,
+) -> Vec<usize> {
+    let (source_x, source_y) = objects[source_index].pos();
+
+    let xs = source_x-1..source_x+2;
+    let ys = source_y-1..source_y+2;
+
+    let cross_product = |x| {
+        ys.clone()
+          .map(|y| (x, y))
+          .filter(|(x, y)| (*x, *y) != (source_x, source_y))
+          .collect::<Vec<(i32,i32)>>()
+    };
+
+    xs.flat_map(cross_product)
+      .filter_map(|(x, y)| {
+        if x == source_x && y == source_y {
+            return Option::None;
+        }
+
+        objects
+            .iter()
+            .position(|o| o.fighter.is_some() && o.x == x && o.y == y)
+    }).collect()
 }
 
 fn load_game() -> Result<(Vec<Object>, Game), Box<Error>> {

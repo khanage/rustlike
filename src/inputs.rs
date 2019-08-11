@@ -24,11 +24,6 @@ pub fn handle_keys(
 
     let player_alive = objects[PLAYER].alive;
 
-    let mut update_player = |x: i32, y: i32| {
-        player_move_or_attack(x, y, game, objects);
-        TookTurn
-    };
-
     match (key, player_alive) {
         // Get a lot of this for some reason
         (Key { code: NoKey, .. }, ..) => DidntTakeTurn,
@@ -66,16 +61,16 @@ pub fn handle_keys(
         }
 
         (Key { code, printable, .. }, true) => match (code, printable) {
-            (Char, '.') => TookTurn,
+            (Char, '.') => EndedMove,
 
-            (Char, 'k') | (Up, _) => update_player(0, -1),
-            (Char, 'j') | (Down, _) => update_player(0, 1),
-            (Char, 'h') | (Left, _) => update_player(-1, 0),
-            (Char, 'l') | (Right, _) => update_player(1, 0),
-            (Char, 'y') => update_player(-1, -1),
-            (Char, 'u') => update_player(1, -1),
-            (Char, 'n') => update_player(-1, 1),
-            (Char, 'm') => update_player(1, 1),
+            (Char, 'k') | (Up, _) => Move(0, -1),
+            (Char, 'j') | (Down, _) => Move(0, 1),
+            (Char, 'h') | (Left, _) => Move(-1, 0),
+            (Char, 'l') | (Right, _) => Move(1, 0),
+            (Char, 'y') => Move(-1, -1),
+            (Char, 'u') => Move(1, -1),
+            (Char, 'n') => Move(-1, 1),
+            (Char, 'm') => Move(1, 1),
 
             (Char, 'g') => {
                 game.log.gutter_text(
@@ -119,7 +114,7 @@ pub fn handle_keys(
                 if let Some(inventory_index) = inventory_index {
                     use_item(inventory_index, objects, game, tcod);
                 }
-                TookTurn
+                DidntTakeTurn
             },
 
             (Char, 'c') => {
